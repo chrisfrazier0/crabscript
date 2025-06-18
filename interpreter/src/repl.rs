@@ -1,7 +1,10 @@
-use crate::lexer::{Lexer, crab::CrabLexer, token::TokenType};
+use crate::parser::{Parser, crab::CrabParser};
 use std::io::{self, BufRead, Write};
 
 const PROMPT: &str = ">> ";
+const ASCII_CRAB: &str = r#" v  ____  v
+ \(. , .)/
+  //———\\   "#;
 
 pub fn start<R: BufRead, W: Write>(mut input: R, mut output: W) -> io::Result<()> {
   loop {
@@ -13,13 +16,22 @@ pub fn start<R: BufRead, W: Write>(mut input: R, mut output: W) -> io::Result<()
       return Ok(());
     }
 
-    let mut lexer = CrabLexer::new(line.trim());
-    loop {
-      let token = lexer.next_token();
-      if token.token_type() == TokenType::Eof {
-        break;
+    let mut parser = CrabParser::from(line.as_str());
+    let program = parser.parse_program();
+
+    if !parser.errors().is_empty() {
+      writeln!(
+        output,
+        "\n{}Woops! We ran into some issues!\n\nParser errors:",
+        ASCII_CRAB,
+      )?;
+      for msg in parser.errors() {
+        writeln!(output, "  - {}", msg)?;
       }
-      writeln!(output, "{}", token)?;
+      writeln!(output)?;
+      continue;
     }
+
+    writeln!(output, "{}", program)?;
   }
 }
