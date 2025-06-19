@@ -1,4 +1,4 @@
-use crate::lexer::token::Token;
+use crate::{format::f64_to_string, lexer::token::Token};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +21,7 @@ pub enum Statement {
 pub enum Expression {
   Nil(Nil),
   Integer(Integer),
+  Float(Float),
   Boolean(Boolean),
   String(StringValue),
   Identifier(Identifier),
@@ -65,6 +66,7 @@ impl fmt::Display for Expression {
     match self {
       Self::Nil(a) => a.fmt(f),
       Self::Integer(a) => a.fmt(f),
+      Self::Float(a) => a.fmt(f),
       Self::Boolean(a) => a.fmt(f),
       Self::String(a) => a.fmt(f),
       Self::Identifier(a) => a.fmt(f),
@@ -233,7 +235,7 @@ impl Nil {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Integer {
   token: Token,
-  value: i32,
+  value: i64,
 }
 
 impl fmt::Display for Integer {
@@ -243,7 +245,7 @@ impl fmt::Display for Integer {
 }
 
 impl Integer {
-  pub fn new(token: Token, value: i32) -> Self {
+  pub fn new(token: Token, value: i64) -> Self {
     Self { token, value }
   }
 
@@ -251,7 +253,33 @@ impl Integer {
     &self.token
   }
 
-  pub fn value(&self) -> i32 {
+  pub fn value(&self) -> i64 {
+    self.value
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Float {
+  token: Token,
+  value: f64,
+}
+
+impl fmt::Display for Float {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", f64_to_string(self.value))
+  }
+}
+
+impl Float {
+  pub fn new(token: Token, value: f64) -> Self {
+    Self { token, value }
+  }
+
+  pub fn token(&self) -> &Token {
+    &self.token
+  }
+
+  pub fn value(&self) -> f64 {
     self.value
   }
 }

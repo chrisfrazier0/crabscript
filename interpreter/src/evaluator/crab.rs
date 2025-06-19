@@ -73,6 +73,7 @@ impl CrabEvaluator {
     match expr {
       Expression::Nil(_) => Object::Nil,
       Expression::Integer(i) => Object::Integer(i.value()),
+      Expression::Float(f) => Object::Float(f.value()),
       Expression::Boolean(b) => Object::Boolean(b.value()),
       Expression::String(s) => Object::String(s.value().to_string()),
       Expression::Identifier(id) => env
@@ -142,12 +143,11 @@ impl CrabEvaluator {
   fn eval_prefix(&self, op: &str, right: &Object) -> Object {
     match op {
       "!" => Object::Boolean(!Object::is_truthy(right)),
-      "-" => {
-        let Object::Integer(int) = right else {
-          return Object::Error(format!("unknown operator: {}{}", op, right));
-        };
-        Object::Integer(-int)
-      }
+      "-" => match right {
+        Object::Integer(int) => Object::Integer(-int),
+        Object::Float(f) => Object::Float(-f),
+        _ => Object::Error(format!("unknown operator: {}{}", op, right)),
+      },
       _ => Object::Error(format!("unknown operator: {}{}", op, right)),
     }
   }
@@ -155,6 +155,9 @@ impl CrabEvaluator {
   fn eval_infix(&self, op: &str, left: &Object, right: &Object) -> Object {
     match (left, right) {
       (Object::Integer(l), Object::Integer(r)) => self.eval_infix_integers(op, *l, *r),
+      (Object::Float(l), Object::Float(r)) => self.eval_infix_floats(op, *l, *r),
+      (Object::Float(l), Object::Integer(r)) => self.eval_infix_integers(op, *l as i64, *r),
+      (Object::Integer(l), Object::Float(r)) => self.eval_infix_integers(op, *l, *r as i64),
       (Object::Boolean(l), Object::Boolean(r)) => self.eval_infix_booleans(op, *l, *r),
       (Object::String(l), Object::String(r)) => self.eval_infix_strings(op, l, r),
       _ => {
@@ -167,12 +170,26 @@ impl CrabEvaluator {
     }
   }
 
-  fn eval_infix_integers(&self, op: &str, left: i32, right: i32) -> Object {
+  fn eval_infix_integers(&self, op: &str, left: i64, right: i64) -> Object {
     match op {
       "+" => Object::Integer(left + right),
       "-" => Object::Integer(left - right),
       "*" => Object::Integer(left * right),
       "/" => Object::Integer(left / right),
+      "<" => Object::Boolean(left < right),
+      ">" => Object::Boolean(left > right),
+      "==" => Object::Boolean(left == right),
+      "!=" => Object::Boolean(left != right),
+      _ => Object::Error(format!("unknown operator: {} {} {}", left, op, right)),
+    }
+  }
+
+  fn eval_infix_floats(&self, op: &str, left: f64, right: f64) -> Object {
+    match op {
+      "+" => Object::Float(left + right),
+      "-" => Object::Float(left - right),
+      "*" => Object::Float(left * right),
+      "/" => Object::Float(left / right),
       "<" => Object::Boolean(left < right),
       ">" => Object::Boolean(left > right),
       "==" => Object::Boolean(left == right),
@@ -323,6 +340,23 @@ mod tests {
   }
 
   #[test]
+  fn crab_eval_float() {
+    let tests = [
+      ("5.0", Object::Float(5.0)),
+      ("10.0;", Object::Float(10.0)),
+      ("-5.0;", Object::Float(-5.0)),
+      ("-10.0", Object::Float(-10.0)),
+      ("--1.0", Object::Float(1.0)),
+      ("1.0 + 2.2", Object::Float(3.2)),
+    ];
+
+    for (i, (input, expected)) in tests.iter().enumerate() {
+      let output = test_eval(input);
+      assert_eq!(output, *expected, "test[{}] value", i + 1);
+    }
+  }
+
+  #[test]
   fn crab_eval_boolean() {
     let tests = [
       ("true", Object::Boolean(true)),
@@ -334,6 +368,8 @@ mod tests {
       ("!!false", Object::Boolean(false)),
       ("!!5", Object::Boolean(true)),
       ("!!0", Object::Boolean(false)),
+      ("!!0.0", Object::Boolean(false)),
+      ("!!1.2", Object::Boolean(true)),
       ("!''", Object::Boolean(true)),
       ("!!''", Object::Boolean(false)),
       ("!!'hello'", Object::Boolean(true)),

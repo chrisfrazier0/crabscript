@@ -50,8 +50,8 @@ impl Lexer for CrabLexer {
           let token_type = TokenType::from(ident.as_str());
           return Token::new(token_type, &ident);
         } else if Self::is_digit(ch) {
-          let number = self.read_number();
-          return Token::new(TokenType::Int, &number);
+          let (tt, number) = self.read_number();
+          return Token::new(tt, &number);
         } else {
           Token::new(TokenType::Invalid, &ch.to_string())
         }
@@ -111,12 +111,26 @@ impl CrabLexer {
     self.input[position..self.position].iter().collect()
   }
 
-  fn read_number(&mut self) -> String {
+  fn read_number(&mut self) -> (TokenType, String) {
     let position = self.position;
+    let mut has_decimal = false;
     while self.ch.is_some_and(Self::is_digit) {
       self.read_char();
     }
-    self.input[position..self.position].iter().collect()
+    if self.ch == Some('.') {
+      has_decimal = true;
+      self.read_char();
+      while self.ch.is_some_and(Self::is_digit) {
+        self.read_char();
+      }
+    }
+    let tt = if has_decimal {
+      TokenType::Float
+    } else {
+      TokenType::Int
+    };
+    let number = self.input[position..self.position].iter().collect();
+    (tt, number)
   }
 
   fn read_string(&mut self) -> String {
@@ -165,6 +179,9 @@ mod tests {
       let result = add(five, _ten);
       !-/*5;
       5 < 10 > 5;
+
+      2.0
+      1.234
 
       if (5 < 10) {
         return true;
@@ -231,6 +248,8 @@ mod tests {
       (TokenType::GreaterThan, ">"),
       (TokenType::Int, "5"),
       (TokenType::Semicolon, ";"),
+      (TokenType::Float, "2.0"),
+      (TokenType::Float, "1.234"),
       (TokenType::If, "if"),
       (TokenType::LParen, "("),
       (TokenType::Int, "5"),

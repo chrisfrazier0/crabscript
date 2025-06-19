@@ -37,7 +37,7 @@ pub fn start() -> io::Result<()> {
     }
 
     match evaluated {
-      Object::Integer(_) | Object::Boolean(_) | Object::String(_) => {
+      Object::Integer(_) | Object::Float(_) | Object::Boolean(_) | Object::String(_) => {
         writeln!(output, " {}", evaluated)?
       }
       _ => {}

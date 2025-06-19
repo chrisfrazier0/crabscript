@@ -8,8 +8,8 @@ use crate::{
     Parser,
     ast::{
       Alternative, BlockExpression, Boolean, CallExpression, Expression, ExpressionStatement,
-      FunctionExpression, Identifier, IfExpression, InfixExpression, Integer, LetStatement, Nil,
-      Node, PrefixExpression, Program, ReturnStatement, Statement, StringValue,
+      Float, FunctionExpression, Identifier, IfExpression, InfixExpression, Integer, LetStatement,
+      Nil, Node, PrefixExpression, Program, ReturnStatement, Statement, StringValue,
     },
     precedence::Precedence,
   },
@@ -70,6 +70,13 @@ where
   fn integer_error(&mut self) {
     self.errors.push(format!(
       "could not parse '{}' as integer",
+      self.cur_token.literal(),
+    ));
+  }
+
+  fn float_error(&mut self) {
+    self.errors.push(format!(
+      "could not parse '{}' as float",
       self.cur_token.literal(),
     ));
   }
@@ -225,6 +232,7 @@ where
       TokenType::If => self.parse_if().map(|ie| Expression::If(Box::new(ie))),
       TokenType::Nil => self.parse_nil().map(Expression::Nil),
       TokenType::Int => self.parse_integer().map(Expression::Integer),
+      TokenType::Float => self.parse_float().map(Expression::Float),
       TokenType::True | TokenType::False => self.parse_boolean().map(Expression::Boolean),
       TokenType::String => self.parse_string().map(Expression::String),
       TokenType::Ident => self.parse_identifier().map(Expression::Identifier),
@@ -277,11 +285,20 @@ where
 
   fn parse_integer(&mut self) -> Option<Integer> {
     let token = self.cur_token.clone();
-    let Ok(value) = self.cur_token.literal().parse::<i32>() else {
+    let Ok(value) = self.cur_token.literal().parse::<i64>() else {
       self.integer_error();
       return None;
     };
     Some(Integer::new(token, value))
+  }
+
+  fn parse_float(&mut self) -> Option<Float> {
+    let token = self.cur_token.clone();
+    let Ok(value) = self.cur_token.literal().parse::<f64>() else {
+      self.float_error();
+      return None;
+    };
+    Some(Float::new(token, value))
   }
 
   fn parse_boolean(&mut self) -> Option<Boolean> {
@@ -449,7 +466,7 @@ mod tests {
   use super::*;
   use crate::{
     lexer::crab::CrabLexer,
-    parser::ast::{Expression, Integer, Statement},
+    parser::ast::{Expression, Float, Integer, Statement},
   };
 
   // --- Statement Test Helpers ---
@@ -491,14 +508,15 @@ mod tests {
 
   #[derive(Debug)]
   enum Expected {
-    Integer(i32),
+    Integer(i64),
+    Float(f64),
     Boolean(bool),
     String(String),
     Identifier(String),
-    PrefixInteger(String, i32),
+    PrefixInteger(String, i64),
     PrefixBoolean(String, bool),
     PrefixIdentifier(String, String),
-    InfixInteger(i32, String, i32),
+    InfixInteger(i64, String, i64),
     InfixBoolean(bool, String, bool),
     InfixIdentifier(String, String, String),
     IfIdentifier(String, String, String, String, Option<String>),
@@ -527,6 +545,7 @@ mod tests {
     };
     match (es.expr(), expected) {
       (Expression::Integer(i), Expected::Integer(val)) => test_integer(i, *val),
+      (Expression::Float(f), Expected::Float(val)) => test_float(f, *val),
       (Expression::Boolean(b), Expected::Boolean(val)) => test_boolean(b, *val),
       (Expression::String(s), Expected::String(val)) => test_string(s, val),
       (Expression::Identifier(ident), Expected::Identifier(val)) => test_identifier(ident, val),
@@ -564,9 +583,19 @@ mod tests {
     }
   }
 
-  fn test_integer(i: &Integer, value: i32) -> bool {
+  fn test_integer(i: &Integer, value: i64) -> bool {
     assert_eq!(i.value(), value, "integer value");
     assert_eq!(i.token().literal(), &value.to_string(), "integer literal");
+    true
+  }
+
+  fn test_float(f: &Float, value: f64) -> bool {
+    assert_eq!(f.value(), value, "float value");
+    assert_eq!(
+      f.token().literal(),
+      value.to_string() + ".0",
+      "float literal"
+    );
     true
   }
 
@@ -588,7 +617,7 @@ mod tests {
     true
   }
 
-  fn test_prefix_integer(pe: &PrefixExpression, op: &str, value: i32) -> bool {
+  fn test_prefix_integer(pe: &PrefixExpression, op: &str, value: i64) -> bool {
     assert_eq!(pe.op(), op, "prefix integer operator");
     let Expression::Integer(i) = pe.right() else {
       panic!("right expression not Integer, got: {:?}", pe.right());
@@ -612,7 +641,7 @@ mod tests {
     test_identifier(i, value)
   }
 
-  fn test_infix_integer(ie: &InfixExpression, left: i32, op: &str, right: i32) -> bool {
+  fn test_infix_integer(ie: &InfixExpression, left: i64, op: &str, right: i64) -> bool {
     assert_eq!(ie.op(), op, "infix integer operator");
     let Expression::Integer(a) = ie.left() else {
       panic!("left expression not Integer, got: {:?}", ie.left());
@@ -868,6 +897,22 @@ mod tests {
     assert!(test_expression_statement(
       &program.statements()[0],
       &Expected::Integer(5),
+    ));
+  }
+
+  #[test]
+  fn crab_parser_float_expression() {
+    let input = "5.0;";
+
+    let mut parser = CrabParser::from(input);
+    let program = parser.parse_program();
+
+    test_parser_errors(&parser);
+    assert_eq!(program.statements().len(), 1, "statement length");
+
+    assert!(test_expression_statement(
+      &program.statements()[0],
+      &Expected::Float(5.0),
     ));
   }
 
@@ -1249,7 +1294,7 @@ mod tests {
       ("!true + 5;", "((!true) + 5);"),
       ("!false + 5 * 3;", "((!false) + (5 * 3));"),
       ("1 + (2 + 3) + 4;", "((1 + (2 + 3)) + 4);"),
-      ("(5 + 5) * 2", "((5 + 5) * 2);"),
+      ("(5 + 5.1) * 2", "((5 + 5.1) * 2);"),
       ("2 / (5 + 5)", "(2 / (5 + 5));"),
       ("-(5 + 5);", "(-(5 + 5));"),
       ("!(true == true)", "(!(true == true));"),

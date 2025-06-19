@@ -1,5 +1,6 @@
 use crate::{
   evaluator::{Shared, builtin::BuiltinFunction, env::Environment},
+  format::f64_to_string,
   parser::ast::FunctionExpression,
 };
 use std::fmt;
@@ -7,7 +8,8 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub enum Object {
   Nil,
-  Integer(i32),
+  Integer(i64),
+  Float(f64),
   Boolean(bool),
   String(String),
   Function(FunctionExpression, Shared<Environment>),
@@ -20,6 +22,7 @@ impl PartialEq for Object {
   fn eq(&self, other: &Self) -> bool {
     match (self, other) {
       (Self::Integer(a), Self::Integer(b)) => a == b,
+      (Self::Float(a), Self::Float(b)) => a == b,
       (Self::Boolean(a), Self::Boolean(b)) => a == b,
       (Self::String(a), Self::String(b)) => a == b,
       (Self::Function(a, _), Self::Function(b, _)) => a == b,
@@ -37,6 +40,7 @@ impl fmt::Display for Object {
     match self {
       Self::Nil => write!(f, "nil"),
       Self::Integer(i) => i.fmt(f),
+      Self::Float(x) => write!(f, "{}", f64_to_string(*x)),
       Self::Boolean(b) => b.fmt(f),
       Self::String(s) => write!(f, "'{}'", s),
       Self::Function(n, _) => n.fmt(f),
@@ -53,6 +57,8 @@ impl Object {
       Self::Nil => false,
       Self::Integer(0) => false,
       Self::Integer(_) => true,
+      Self::Float(0.0) => false,
+      Self::Float(_) => true,
       Self::Boolean(true) => true,
       Self::Boolean(false) => false,
       Self::String(s) => !s.is_empty(),
