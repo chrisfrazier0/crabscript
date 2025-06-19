@@ -1,27 +1,36 @@
 use crate::{
-  evaluator::{Evaluator, env::Environment, object::Object},
-  parser::ast::{Alternative, Expression, IfExpression, Node, Statement},
+  evaluator::{Evaluator, Shared, builtin::BUILTINS, env::Environment, object::Object},
+  parser::ast::{Alternative, BlockExpression, Expression, IfExpression, Node, Statement},
 };
-use std::{cell::RefCell, mem, rc::Rc};
+use std::mem;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CrabEvaluator;
 
 impl Evaluator for CrabEvaluator {
-  fn eval(&self, node: &Node, env: Rc<RefCell<Environment>>) -> Object {
-    match node {
+  fn eval(&self, node: &Node, env: Shared<Environment>) -> Object {
+    let obj = match node {
       Node::Program(p) => self.eval_statements(p.statements(), env),
       Node::Statement(s) => self.eval_statement(s, env),
       Node::Expression(x) => self.eval_expression(x, env),
+    };
+    match obj {
+      Object::Return(x) => *x,
+      other => other,
     }
   }
 }
 
 impl CrabEvaluator {
-  fn eval_statements(&self, stmts: &[Statement], env: Rc<RefCell<Environment>>) -> Object {
+  fn eval_block(&self, be: &BlockExpression, env: Shared<Environment>) -> Object {
+    let env = Environment::shared_child(&env);
+    self.eval_statements(be.statements(), env)
+  }
+
+  fn eval_statements(&self, stmts: &[Statement], env: Shared<Environment>) -> Object {
     let mut result = Object::Nil;
     for stmt in stmts {
-      result = self.eval_statement(stmt, Rc::clone(&env));
+      result = self.eval_statement(stmt, env.clone());
       if matches!(result, Object::Return(_)) || matches!(result, Object::Error(_)) {
         return result;
       }
@@ -29,15 +38,16 @@ impl CrabEvaluator {
     result
   }
 
-  fn eval_statement(&self, stmt: &Statement, env: Rc<RefCell<Environment>>) -> Object {
+  fn eval_statement(&self, stmt: &Statement, env: Shared<Environment>) -> Object {
     match stmt {
       Statement::Expression(x) => self.eval_expression(x.expr(), env),
       Statement::If(ie) => self.eval_if(ie, env),
+      Statement::Block(be) => self.eval_block(be, env),
       Statement::Let(ls) => {
         let val = ls
           .value()
           .as_ref()
-          .map(|v| self.eval_expression(v, Rc::clone(&env)))
+          .map(|v| self.eval_expression(v, env.clone()))
           .unwrap_or(Object::Nil);
         if matches!(val, Object::Error(_)) {
           return val;
@@ -59,14 +69,20 @@ impl CrabEvaluator {
     }
   }
 
-  fn eval_expression(&self, expr: &Expression, env: Rc<RefCell<Environment>>) -> Object {
+  fn eval_expression(&self, expr: &Expression, env: Shared<Environment>) -> Object {
     match expr {
       Expression::Nil(_) => Object::Nil,
       Expression::Integer(i) => Object::Integer(i.value()),
       Expression::Boolean(b) => Object::Boolean(b.value()),
+      Expression::String(s) => Object::String(s.value().to_string()),
       Expression::Identifier(id) => env
         .borrow()
         .get(id.value())
+        .or_else(|| {
+          BUILTINS
+            .get(id.value())
+            .map(|b| Object::Builtin(id.value().into(), *b))
+        })
         .unwrap_or(Object::Error(format!(
           "identifier not found: {}",
           id.value()
@@ -79,7 +95,7 @@ impl CrabEvaluator {
         self.eval_prefix(p.op(), &right)
       }
       Expression::Infix(f) => {
-        let left = self.eval_expression(f.left(), Rc::clone(&env));
+        let left = self.eval_expression(f.left(), env.clone());
         if matches!(left, Object::Error(_)) {
           return left;
         }
@@ -92,7 +108,7 @@ impl CrabEvaluator {
       Expression::If(ie) => self.eval_if(ie, env),
       Expression::Function(fe) => Object::Function(fe.clone(), env),
       Expression::Call(ce) => {
-        let function = self.eval_expression(ce.function(), Rc::clone(&env));
+        let function = self.eval_expression(ce.function(), env.clone());
         if matches!(function, Object::Error(_)) {
           return function;
         }
@@ -100,20 +116,21 @@ impl CrabEvaluator {
         if args.len() == 1 && matches!(args[0], Object::Error(_)) {
           return args[0].clone();
         }
+        let args: Vec<&Object> = args.iter().collect();
         self.apply_function(&function, &args)
       }
-      Expression::Block(b) => self.eval_statements(b.statements(), env),
+      Expression::Block(b) => self.eval_block(b, env),
     }
   }
 
   fn eval_expression_vec(
     &self,
     expressions: &Vec<Expression>,
-    env: Rc<RefCell<Environment>>,
+    env: Shared<Environment>,
   ) -> Vec<Object> {
     let mut result = vec![];
     for expr in expressions {
-      let evaluated = self.eval_expression(expr, Rc::clone(&env));
+      let evaluated = self.eval_expression(expr, env.clone());
       if matches!(evaluated, Object::Error(_)) {
         return vec![evaluated];
       }
@@ -124,7 +141,7 @@ impl CrabEvaluator {
 
   fn eval_prefix(&self, op: &str, right: &Object) -> Object {
     match op {
-      "!" => Object::Boolean(!self.is_truthy(right)),
+      "!" => Object::Boolean(!Object::is_truthy(right)),
       "-" => {
         let Object::Integer(int) = right else {
           return Object::Error(format!("unknown operator: {}{}", op, right));
@@ -139,6 +156,7 @@ impl CrabEvaluator {
     match (left, right) {
       (Object::Integer(l), Object::Integer(r)) => self.eval_infix_integers(op, *l, *r),
       (Object::Boolean(l), Object::Boolean(r)) => self.eval_infix_booleans(op, *l, *r),
+      (Object::String(l), Object::String(r)) => self.eval_infix_strings(op, l, r),
       _ => {
         if mem::discriminant(left) != mem::discriminant(right) {
           Object::Error(format!("type mismatch: {} {} {}", left, op, right))
@@ -171,16 +189,25 @@ impl CrabEvaluator {
     }
   }
 
-  fn eval_if(&self, ie: &IfExpression, env: Rc<RefCell<Environment>>) -> Object {
-    let condition = self.eval_expression(ie.condition(), Rc::clone(&env));
+  fn eval_infix_strings(&self, op: &str, left: &str, right: &str) -> Object {
+    match op {
+      "+" => Object::String(left.to_string() + right),
+      "==" => Object::Boolean(left == right),
+      "!=" => Object::Boolean(left != right),
+      _ => Object::Error(format!("unknown operator: STRING {} STRING", op)),
+    }
+  }
+
+  fn eval_if(&self, ie: &IfExpression, env: Shared<Environment>) -> Object {
+    let condition = self.eval_expression(ie.condition(), env.clone());
     if matches!(condition, Object::Error(_)) {
       return condition;
     }
-    if self.is_truthy(&condition) {
-      self.eval_expression(&Expression::Block(ie.consequence().clone()), env)
+    if Object::is_truthy(&condition) {
+      self.eval_block(ie.consequence(), env)
     } else if let Some(alt) = ie.alternative() {
       match alt {
-        Alternative::Block(be) => self.eval_statements(be.statements(), env),
+        Alternative::Block(be) => self.eval_block(be, env),
         Alternative::If(ie) => self.eval_if(ie, env),
       }
     } else {
@@ -188,7 +215,10 @@ impl CrabEvaluator {
     }
   }
 
-  fn apply_function(&self, func: &Object, args: &[Object]) -> Object {
+  fn apply_function(&self, func: &Object, args: &[&Object]) -> Object {
+    if let Object::Builtin(_, f) = func {
+      return f(args);
+    }
     let Object::Function(fe, _) = func else {
       return Object::Error(format!("not a function: {:?}", func));
     };
@@ -206,25 +236,15 @@ impl CrabEvaluator {
     }
   }
 
-  fn extend_function_env(&self, func: &Object, args: &[Object]) -> Rc<RefCell<Environment>> {
+  fn extend_function_env(&self, func: &Object, args: &[&Object]) -> Shared<Environment> {
     if let Object::Function(fe, env) = func {
-      let mut function_env = Environment::new_child(Rc::clone(env));
+      let mut function_env = Environment::new_child(env);
       for (param, arg) in fe.parameters().iter().zip(args.iter()) {
-        function_env.insert(param.value(), arg.clone());
+        function_env.insert(param.value(), (*arg).clone());
       }
-      Rc::new(RefCell::new(function_env))
+      function_env.into()
     } else {
-      Rc::new(RefCell::new(Environment::default()))
-    }
-  }
-
-  fn is_truthy(&self, obj: &Object) -> bool {
-    match obj {
-      Object::Nil => false,
-      Object::Boolean(true) => true,
-      Object::Boolean(false) => false,
-      Object::Integer(0) => false,
-      _ => true,
+      Environment::shared()
     }
   }
 }
@@ -243,8 +263,8 @@ mod tests {
 
   fn test_eval(input: &str) -> Object {
     let crab = CrabEvaluator::default();
-    let env = Rc::new(RefCell::new(Environment::default()));
-    let mut parser = CrabParser::from(input);
+    let env = Environment::shared();
+    let parser = CrabParser::from(input);
 
     parser
       .parse()
@@ -314,6 +334,9 @@ mod tests {
       ("!!false", Object::Boolean(false)),
       ("!!5", Object::Boolean(true)),
       ("!!0", Object::Boolean(false)),
+      ("!''", Object::Boolean(true)),
+      ("!!''", Object::Boolean(false)),
+      ("!!'hello'", Object::Boolean(true)),
       ("1 < 2", Object::Boolean(true)),
       ("1 > 2", Object::Boolean(false)),
       ("1 < 1", Object::Boolean(false)),
@@ -331,6 +354,36 @@ mod tests {
       ("(1 < 2) == false", Object::Boolean(false)),
       ("(1 > 2) == true", Object::Boolean(false)),
       ("(1 > 2) == false", Object::Boolean(true)),
+    ];
+
+    for (i, (input, expected)) in tests.iter().enumerate() {
+      let output = test_eval(input);
+      assert_eq!(output, *expected, "test[{}] value", i + 1);
+    }
+  }
+
+  #[test]
+  fn crab_eval_string() {
+    let tests = [
+      ("'hello_world'", Object::String("hello_world".into())),
+      ("'Hello World!';", Object::String("Hello World!".into())),
+    ];
+
+    for (i, (input, expected)) in tests.iter().enumerate() {
+      let output = test_eval(input);
+      assert_eq!(output, *expected, "test[{}] value", i + 1);
+    }
+  }
+
+  #[test]
+  fn crab_eval_string_concat() {
+    let tests = [
+      (
+        "'Hello ' + 'World!';",
+        Object::String("Hello World!".into()),
+      ),
+      ("'Hello' == 'Hello'", Object::Boolean(true)),
+      ("'Hello' != 'Hello'", Object::Boolean(false)),
     ];
 
     for (i, (input, expected)) in tests.iter().enumerate() {
@@ -443,12 +496,7 @@ mod tests {
 
     for (i, (input, expected)) in tests.iter().enumerate() {
       let output = test_eval(input);
-      assert_eq!(
-        output,
-        Object::Return(Box::new(expected.clone())),
-        "test[{}] value",
-        i + 1
-      );
+      assert_eq!(output, expected.clone(), "test[{}] value", i + 1);
     }
   }
 
@@ -465,6 +513,28 @@ mod tests {
 
     let output = test_eval(input);
     assert_eq!(output, Object::Integer(4), "closure value");
+  }
+
+  #[test]
+  fn crab_eval_builtins() {
+    let tests = [
+      ("len!('')", Object::Integer(0)),
+      ("len!('four')", Object::Integer(4)),
+      ("len!('hello world')", Object::Integer(11)),
+      (
+        "len!(1)",
+        Object::Error("argument to `len!` not supported, got `1`".into()),
+      ),
+      (
+        "len!('', '')",
+        Object::Error("wrong number of arguments for `len!`: expected 1, got 2".into()),
+      ),
+    ];
+
+    for (i, (input, expected)) in tests.iter().enumerate() {
+      let output = test_eval(input);
+      assert_eq!(output, *expected, "test[{}] value", i + 1);
+    }
   }
 
   #[test]
@@ -501,6 +571,16 @@ mod tests {
         "#,
         "identifier not found: x",
       ),
+      (
+        "fn(x) { let foo = x; }(10); foo;",
+        "identifier not found: foo",
+      ),
+      (
+        "if true { let foo = 10; } foo;",
+        "identifier not found: foo",
+      ),
+      ("'Hello ' - 'World';", "unknown operator: STRING - STRING"),
+      ("'Hello ' > 'World';", "unknown operator: STRING > STRING"),
     ];
 
     for (i, (input, expected)) in tests.iter().enumerate() {

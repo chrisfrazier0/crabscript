@@ -1,25 +1,26 @@
-use crate::evaluator::object::Object;
+use crate::evaluator::{Shared, object::Object};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 #[derive(Debug, Clone, Default)]
 pub struct Environment {
   store: HashMap<String, Object>,
-  outer: Option<Rc<RefCell<Environment>>>,
+  outer: Option<Shared<Environment>>,
 }
 
 impl Environment {
-  pub fn new() -> Self {
+  pub fn new_child(outer: &Shared<Environment>) -> Self {
     Self {
       store: HashMap::new(),
-      outer: None,
+      outer: Some(Rc::clone(outer)),
     }
   }
 
-  pub fn new_child(outer: Rc<RefCell<Environment>>) -> Self {
-    Self {
-      store: HashMap::new(),
-      outer: Some(outer),
-    }
+  pub fn shared() -> Shared<Self> {
+    Rc::new(RefCell::new(Self::default()))
+  }
+
+  pub fn shared_child(outer: &Shared<Environment>) -> Shared<Self> {
+    Rc::new(RefCell::new(Self::new_child(outer)))
   }
 
   pub fn insert(&mut self, key: &str, value: Object) {
@@ -33,6 +34,12 @@ impl Environment {
         .as_ref()
         .and_then(|outer| outer.borrow().get(key))
     })
+  }
+}
+
+impl From<Environment> for Shared<Environment> {
+  fn from(value: Environment) -> Self {
+    Rc::new(RefCell::new(value))
   }
 }
 

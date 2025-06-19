@@ -2,8 +2,8 @@ pub mod ast;
 pub mod crab;
 pub mod precedence;
 
-use crate::{lexer::Lexer, parser::ast::Node};
+use crate::parser::ast::Node;
 
-pub trait Parser<L: Lexer>: Send + Sync {
-  fn parse(&mut self) -> Result<Node, &Vec<String>>;
+pub trait Parser: Send + Sync {
+  fn parse(self) -> Result<Node, Vec<String>>;
 }

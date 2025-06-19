@@ -43,6 +43,7 @@ impl Lexer for CrabLexer {
       Some('>') => Token::new(TokenType::GreaterThan, ">"),
       Some(',') => Token::new(TokenType::Comma, ","),
       Some(';') => Token::new(TokenType::Semicolon, ";"),
+      Some('\'') => Token::new(TokenType::String, self.read_string().as_str()),
       Some(ch) => {
         if Self::is_letter(ch) {
           let ident = self.read_identifier();
@@ -118,8 +119,17 @@ impl CrabLexer {
     self.input[position..self.position].iter().collect()
   }
 
+  fn read_string(&mut self) -> String {
+    self.read_char();
+    let position = self.position;
+    while self.ch.is_some_and(|ch| ch != '\'') {
+      self.read_char();
+    }
+    self.input[position..self.position].iter().collect()
+  }
+
   fn is_letter(ch: char) -> bool {
-    ch.is_alphabetic() || ch == '_'
+    ch.is_alphabetic() || ch == '_' || ch == '$' || ch == '@' || ch == '!'
   }
 
   fn is_digit(ch: char) -> bool {
@@ -127,7 +137,7 @@ impl CrabLexer {
   }
 
   fn is_ident(ch: char) -> bool {
-    ch.is_alphabetic() || ch.is_ascii_digit() || ch == '_'
+    ch.is_alphabetic() || ch.is_ascii_digit() || ch == '_' || ch == '$' || ch == '@' || ch == '!'
   }
 }
 
@@ -161,10 +171,15 @@ mod tests {
       } else {
         return false;
       }
+      $func
+      builtin1!
+      user@func
 
       10 == 10;
       10 != 9;
+      'foobar'
       nil
+      'foo bar'
     "#;
 
     let tests = [
@@ -233,6 +248,9 @@ mod tests {
       (TokenType::False, "false"),
       (TokenType::Semicolon, ";"),
       (TokenType::RBrace, "}"),
+      (TokenType::Ident, "$func"),
+      (TokenType::Ident, "builtin1!"),
+      (TokenType::Ident, "user@func"),
       (TokenType::Int, "10"),
       (TokenType::Eq, "=="),
       (TokenType::Int, "10"),
@@ -241,15 +259,16 @@ mod tests {
       (TokenType::NotEq, "!="),
       (TokenType::Int, "9"),
       (TokenType::Semicolon, ";"),
+      (TokenType::String, "foobar"),
       (TokenType::Nil, "nil"),
-      (TokenType::Eof, ""),
+      (TokenType::String, "foo bar"),
     ];
 
     let mut lexer = CrabLexer::new(input);
     for (i, (expected_type, expected_literal)) in tests.iter().enumerate() {
       let token = lexer.next_token();
       assert_eq!(token.token_type(), *expected_type, "test[{}-1]", i);
-      assert_eq!(token.literal(), expected_literal, "test[{}-2]", i);
+      assert_eq!(token.literal(), *expected_literal, "test[{}-2]", i);
     }
   }
 }

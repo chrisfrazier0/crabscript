@@ -8,6 +8,7 @@ pub enum TokenType {
   False,
   Let,
   Ident,
+  String,
   Int,
   Bang,
   Assign,
@@ -41,6 +42,7 @@ impl fmt::Display for TokenType {
       Self::False => "BOOLEAN",
       Self::Let => "LET",
       Self::Ident => "IDENTIFIER",
+      Self::String => "STRING",
       Self::Int => "INTEGER",
       Self::Bang => "BANG",
       Self::Assign => "ASSIGN",
@@ -63,7 +65,7 @@ impl fmt::Display for TokenType {
       Self::Semicolon => "SEMICOLON",
       Self::Return => "RETURN",
       Self::Eof => "EOF",
-      Self::Invalid => "INVALID",
+      Self::Invalid => "TOKEN",
     };
     write!(f, "{}", token_str)
   }
@@ -103,7 +105,7 @@ impl Token {
     self.token_type
   }
 
-  pub fn literal(&self) -> &String {
+  pub fn literal(&self) -> &str {
     &self.literal
   }
 }
@@ -111,7 +113,8 @@ impl Token {
 impl fmt::Display for Token {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.token_type {
-      TokenType::Eof => write!(f, "{}", self.token_type),
+      TokenType::Eof => self.token_type.fmt(f),
+      TokenType::String => write!(f, "{}", self.token_type),
       _ => write!(f, "{}({})", self.token_type, self.literal),
     }
   }

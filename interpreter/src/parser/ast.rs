@@ -14,6 +14,7 @@ pub enum Statement {
   Return(ReturnStatement),
   Expression(ExpressionStatement),
   If(IfExpression),
+  Block(BlockExpression),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +22,7 @@ pub enum Expression {
   Nil(Nil),
   Integer(Integer),
   Boolean(Boolean),
+  String(StringValue),
   Identifier(Identifier),
   Prefix(Box<PrefixExpression>),
   Infix(Box<InfixExpression>),
@@ -53,6 +55,7 @@ impl fmt::Display for Statement {
       Self::Return(a) => a.fmt(f),
       Self::Expression(a) => a.fmt(f),
       Self::If(a) => a.fmt(f),
+      Self::Block(a) => a.fmt(f),
     }
   }
 }
@@ -63,6 +66,7 @@ impl fmt::Display for Expression {
       Self::Nil(a) => a.fmt(f),
       Self::Integer(a) => a.fmt(f),
       Self::Boolean(a) => a.fmt(f),
+      Self::String(a) => a.fmt(f),
       Self::Identifier(a) => a.fmt(f),
       Self::Prefix(a) => a.fmt(f),
       Self::Infix(a) => a.fmt(f),
@@ -234,7 +238,7 @@ pub struct Integer {
 
 impl fmt::Display for Integer {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.value)
+    self.value.fmt(f)
   }
 }
 
@@ -260,7 +264,7 @@ pub struct Boolean {
 
 impl fmt::Display for Boolean {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.value)
+    self.value.fmt(f)
   }
 }
 
@@ -279,6 +283,32 @@ impl Boolean {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct StringValue {
+  token: Token,
+  value: String,
+}
+
+impl fmt::Display for StringValue {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
+impl StringValue {
+  pub fn new(token: Token, value: String) -> Self {
+    Self { token, value }
+  }
+
+  pub fn token(&self) -> &Token {
+    &self.token
+  }
+
+  pub fn value(&self) -> &str {
+    &self.value
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Identifier {
   token: Token,
   value: String,
@@ -286,7 +316,7 @@ pub struct Identifier {
 
 impl fmt::Display for Identifier {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.value)
+    self.value.fmt(f)
   }
 }
 
@@ -299,7 +329,7 @@ impl Identifier {
     &self.token
   }
 
-  pub fn value(&self) -> &String {
+  pub fn value(&self) -> &str {
     &self.value
   }
 }
@@ -326,7 +356,7 @@ impl PrefixExpression {
     &self.token
   }
 
-  pub fn op(&self) -> &String {
+  pub fn op(&self) -> &str {
     &self.op
   }
 
@@ -367,7 +397,7 @@ impl InfixExpression {
     &self.left
   }
 
-  pub fn op(&self) -> &String {
+  pub fn op(&self) -> &str {
     &self.op
   }
 

@@ -15,5 +15,5 @@ fn main() -> io::Result<()> {
   );
   println!("Feel free to enter commands below\n");
 
-  repl::start(io::stdin().lock(), io::stdout())
+  repl::start()
 }

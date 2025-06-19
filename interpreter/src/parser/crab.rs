@@ -9,7 +9,7 @@ use crate::{
     ast::{
       Alternative, BlockExpression, Boolean, CallExpression, Expression, ExpressionStatement,
       FunctionExpression, Identifier, IfExpression, InfixExpression, Integer, LetStatement, Nil,
-      Node, PrefixExpression, Program, ReturnStatement, Statement,
+      Node, PrefixExpression, Program, ReturnStatement, Statement, StringValue,
     },
     precedence::Precedence,
   },
@@ -30,16 +30,16 @@ impl From<&str> for CrabParser<CrabLexer> {
   }
 }
 
-impl<L> Parser<L> for CrabParser<L>
+impl<L> Parser for CrabParser<L>
 where
   L: Lexer,
 {
-  fn parse(&mut self) -> Result<Node, &Vec<String>> {
+  fn parse(mut self) -> Result<Node, Vec<String>> {
     let program = Node::Program(self.parse_program());
     if self.errors.is_empty() {
       Ok(program)
     } else {
-      Err(&self.errors)
+      Err(self.errors)
     }
   }
 }
@@ -162,6 +162,10 @@ where
         skip = true;
         self.parse_if().map(Statement::If)
       }
+      TokenType::LBrace => {
+        skip = true;
+        self.parse_block().map(Statement::Block)
+      }
       _ => self.parse_expression_statement().map(Statement::Expression),
     };
     if result.is_some()
@@ -182,7 +186,7 @@ where
     if !self.expect_peek(TokenType::Ident) {
       return None;
     }
-    let name = Identifier::new(self.cur_token.clone(), self.cur_token.literal().clone());
+    let name = Identifier::new(self.cur_token.clone(), self.cur_token.literal().to_string());
     let value = if self.maybe_peek(TokenType::Assign) {
       self.next_token();
       Some(self.parse_expression(Precedence::Lowest)?)
@@ -222,6 +226,7 @@ where
       TokenType::Nil => self.parse_nil().map(Expression::Nil),
       TokenType::Int => self.parse_integer().map(Expression::Integer),
       TokenType::True | TokenType::False => self.parse_boolean().map(Expression::Boolean),
+      TokenType::String => self.parse_string().map(Expression::String),
       TokenType::Ident => self.parse_identifier().map(Expression::Identifier),
       TokenType::Bang | TokenType::Minus => self
         .parse_prefix()
@@ -285,15 +290,21 @@ where
     Some(Boolean::new(token, value))
   }
 
+  fn parse_string(&mut self) -> Option<StringValue> {
+    let token = self.cur_token.clone();
+    let value = self.cur_token.literal().to_string();
+    Some(StringValue::new(token, value))
+  }
+
   fn parse_identifier(&mut self) -> Option<Identifier> {
     let token = self.cur_token.clone();
-    let value = self.cur_token.literal().clone();
+    let value = self.cur_token.literal().to_string();
     Some(Identifier::new(token, value))
   }
 
   fn parse_prefix(&mut self) -> Option<PrefixExpression> {
     let token = self.cur_token.clone();
-    let op = self.cur_token.literal().clone();
+    let op = self.cur_token.literal().to_string();
     self.next_token();
     let right = self.parse_expression(Precedence::Prefix)?;
     Some(PrefixExpression::new(token, op, right))
@@ -301,7 +312,7 @@ where
 
   fn parse_infix(&mut self, left: Expression) -> Option<InfixExpression> {
     let token = self.cur_token.clone();
-    let op = self.cur_token.literal().clone();
+    let op = self.cur_token.literal().to_string();
     let precedence = self.current_precedence();
     self.next_token();
     let right = self.parse_expression(precedence)?;
@@ -372,7 +383,7 @@ where
     }
     idents.push(Identifier::new(
       self.cur_token.clone(),
-      self.cur_token.literal().clone(),
+      self.cur_token.literal().to_string(),
     ));
     while self.maybe_peek(TokenType::Comma) {
       if !self.expect_peek(TokenType::Ident) {
@@ -380,7 +391,7 @@ where
       }
       idents.push(Identifier::new(
         self.cur_token.clone(),
-        self.cur_token.literal().clone(),
+        self.cur_token.literal().to_string(),
       ));
     }
     self.expect_peek(TokenType::RParen);
@@ -482,6 +493,7 @@ mod tests {
   enum Expected {
     Integer(i32),
     Boolean(bool),
+    String(String),
     Identifier(String),
     PrefixInteger(String, i32),
     PrefixBoolean(String, bool),
@@ -501,6 +513,13 @@ mod tests {
         panic!("let value not IfExpression, got: {:?}", ls.value());
       };
       return test_if_identifier(&ie, a, op, b, cons, alt.clone());
+    } else if let (Statement::Block(bs), Expected::Block(ident)) = (stmt, expected) {
+      return test_block(bs, ident);
+    } else if let (Statement::Let(ls), Expected::Block(ident)) = (stmt, expected) {
+      let Expression::Block(be) = ls.value().as_ref().unwrap() else {
+        panic!("let value not BlockExpression, got: {:?}", ls.value());
+      };
+      return test_block(be, ident);
     }
 
     let Statement::Expression(es) = stmt else {
@@ -509,6 +528,7 @@ mod tests {
     match (es.expr(), expected) {
       (Expression::Integer(i), Expected::Integer(val)) => test_integer(i, *val),
       (Expression::Boolean(b), Expected::Boolean(val)) => test_boolean(b, *val),
+      (Expression::String(s), Expected::String(val)) => test_string(s, val),
       (Expression::Identifier(ident), Expected::Identifier(val)) => test_identifier(ident, val),
       (Expression::Prefix(pe), Expected::PrefixInteger(op, val)) => {
         test_prefix_integer(pe, op, *val)
@@ -553,6 +573,12 @@ mod tests {
   fn test_boolean(b: &Boolean, value: bool) -> bool {
     assert_eq!(b.value(), value, "boolean value");
     assert_eq!(b.token().literal(), &value.to_string(), "boolean literal");
+    true
+  }
+
+  fn test_string(s: &StringValue, value: &str) -> bool {
+    assert_eq!(s.value(), value, "string value");
+    assert_eq!(s.token().literal(), &value.to_string(), "value literal");
     true
   }
 
@@ -866,6 +892,25 @@ mod tests {
   }
 
   #[test]
+  fn crab_parser_string_expression() {
+    let input = "'hello world'";
+
+    let mut parser = CrabParser::from(input);
+    let program = parser.parse_program();
+
+    test_parser_errors(&parser);
+    assert_eq!(program.statements().len(), 1, "statement length");
+
+    assert!(
+      test_expression_statement(
+        &program.statements()[0],
+        &Expected::String("hello world".into())
+      ),
+      "statement value"
+    );
+  }
+
+  #[test]
   fn crab_parser_identifier_expression() {
     let input = "foobar;";
 
@@ -1152,7 +1197,7 @@ mod tests {
   fn crab_parser_block_expression() {
     let tests = [
       ("{ x };", Expected::Block("x".into())),
-      ("{ y; };", Expected::Block("y".into())),
+      ("let a = { y; };", Expected::Block("y".into())),
     ];
 
     for (i, (input, exp)) in tests.iter().enumerate() {
@@ -1246,10 +1291,7 @@ mod tests {
       ),
       (
         "if { true } { false }",
-        vec![
-          "if condition must not be a block expression",
-          "expected next token to be SEMICOLON, got LBRACE({)",
-        ],
+        vec!["if condition must not be a block expression"],
       ),
       (
         "if (true) a else { b }",
