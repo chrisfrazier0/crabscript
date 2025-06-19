@@ -3,6 +3,7 @@ use std::fmt;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
+  Nil,
   True,
   False,
   Let,
@@ -35,6 +36,7 @@ pub enum TokenType {
 impl fmt::Display for TokenType {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let token_str = match self {
+      Self::Nil => "NIL",
       Self::True => "BOOLEAN",
       Self::False => "BOOLEAN",
       Self::Let => "LET",
@@ -70,6 +72,7 @@ impl fmt::Display for TokenType {
 impl From<&str> for TokenType {
   fn from(value: &str) -> Self {
     match value {
+      "nil" => Self::Nil,
       "true" => Self::True,
       "false" => Self::False,
       "let" => Self::Let,

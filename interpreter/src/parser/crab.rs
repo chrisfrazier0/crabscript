@@ -8,8 +8,8 @@ use crate::{
     Parser,
     ast::{
       Alternative, BlockExpression, Boolean, CallExpression, Expression, ExpressionStatement,
-      FunctionExpression, Identifier, IfExpression, InfixExpression, Integer, LetStatement,
-      PrefixExpression, Program, ReturnStatement, Statement,
+      FunctionExpression, Identifier, IfExpression, InfixExpression, Integer, LetStatement, Nil,
+      Node, PrefixExpression, Program, ReturnStatement, Statement,
     },
     precedence::Precedence,
   },
@@ -34,19 +34,13 @@ impl<L> Parser<L> for CrabParser<L>
 where
   L: Lexer,
 {
-  fn errors(&self) -> &Vec<String> {
-    &self.errors
-  }
-
-  fn parse_program(&mut self) -> Program {
-    let mut program = Program::default();
-    while !self.current_is(TokenType::Eof) {
-      if let Some(stmt) = self.parse_statement(false) {
-        program.push_statement(stmt);
-      }
-      self.next_token();
+  fn parse(&mut self) -> Result<Node, &Vec<String>> {
+    let program = Node::Program(self.parse_program());
+    if self.errors.is_empty() {
+      Ok(program)
+    } else {
+      Err(&self.errors)
     }
-    program
   }
 }
 
@@ -147,18 +141,38 @@ where
 
   // --- Parse Statements ---
 
+  fn parse_program(&mut self) -> Program {
+    let mut program = Program::default();
+    while !self.current_is(TokenType::Eof) {
+      if let Some(stmt) = self.parse_statement(false) {
+        program.push_statement(stmt);
+      }
+      self.next_token();
+    }
+    program
+  }
+
   fn parse_statement(&mut self, block: bool) -> Option<Statement> {
+    let mut skip = false;
     let result = match self.cur_token.token_type() {
       TokenType::Semicolon => return None,
       TokenType::Let => self.parse_let_statement().map(Statement::Let),
       TokenType::Return => self.parse_return_statement().map(Statement::Return),
+      TokenType::If => {
+        skip = true;
+        self.parse_if().map(Statement::If)
+      }
       _ => self.parse_expression_statement().map(Statement::Expression),
     };
     if result.is_some()
       && !self.peek_is(TokenType::Eof)
       && !(block && self.peek_is(TokenType::RBrace))
     {
-      self.expect_peek(TokenType::Semicolon);
+      if skip {
+        self.maybe_peek(TokenType::Semicolon);
+      } else {
+        self.expect_peek(TokenType::Semicolon);
+      }
     }
     result
   }
@@ -205,6 +219,7 @@ where
       TokenType::LBrace => self.parse_block().map(Expression::Block),
       TokenType::Function => self.parse_function().map(Expression::Function),
       TokenType::If => self.parse_if().map(|ie| Expression::If(Box::new(ie))),
+      TokenType::Nil => self.parse_nil().map(Expression::Nil),
       TokenType::Int => self.parse_integer().map(Expression::Integer),
       TokenType::True | TokenType::False => self.parse_boolean().map(Expression::Boolean),
       TokenType::Ident => self.parse_identifier().map(Expression::Identifier),
@@ -249,6 +264,10 @@ where
       return None;
     }
     Some(expr)
+  }
+
+  fn parse_nil(&self) -> Option<Nil> {
+    Some(Nil::new(self.cur_token.clone()))
   }
 
   fn parse_integer(&mut self) -> Option<Integer> {
@@ -427,7 +446,7 @@ mod tests {
   fn is_normal<T: Sized + Send + Sync + Unpin>() {}
 
   fn test_parser_errors<L: Lexer>(parser: &CrabParser<L>) {
-    let errors = parser.errors();
+    let errors = &parser.errors;
     if !errors.is_empty() {
       println!("parser has {} errors", errors.len());
       for err in errors {
@@ -477,6 +496,13 @@ mod tests {
   }
 
   fn test_expression_statement(stmt: &Statement, expected: &Expected) -> bool {
+    if let (Statement::Let(ls), Expected::IfIdentifier(a, op, b, cons, alt)) = (stmt, expected) {
+      let Expression::If(ie) = ls.value().as_ref().unwrap() else {
+        panic!("let value not IfExpression, got: {:?}", ls.value());
+      };
+      return test_if_identifier(&ie, a, op, b, cons, alt.clone());
+    }
+
     let Statement::Expression(es) = stmt else {
       panic!("stmt not ExpressionStatement, got: {:?}", stmt);
     };
@@ -632,7 +658,7 @@ mod tests {
     true
   }
 
-  fn test_function_expr(fe: &FunctionExpression, params: &Vec<String>, body: &str) -> bool {
+  fn test_function_expr(fe: &FunctionExpression, params: &[String], body: &str) -> bool {
     assert_eq!(fe.parameters().len(), params.len(), "function param length");
     for (i, param) in fe.parameters().iter().enumerate() {
       test_identifier(param, params[i].as_str());
@@ -641,7 +667,7 @@ mod tests {
     true
   }
 
-  fn test_call_expr(ce: &CallExpression, name: &str, expected: &Vec<Expected>) -> bool {
+  fn test_call_expr(ce: &CallExpression, name: &str, expected: &[Expected]) -> bool {
     assert_eq!(ce.function().to_string(), name, "call name");
     assert_eq!(ce.arguments().len(), expected.len(), "call argument length");
     for (i, exp) in expected.iter().enumerate() {
@@ -713,7 +739,7 @@ mod tests {
     test_parser_errors(&parser);
     assert_eq!(program.statements().len(), 6, "statement length");
 
-    let expected = vec![
+    let expected = [
       (
         "x",
         Some(Expression::Integer(Integer::new(
@@ -774,7 +800,7 @@ mod tests {
     test_parser_errors(&parser);
     assert_eq!(program.statements().len(), 6, "statement length");
 
-    let expected = vec![
+    let expected = [
       Some(Expression::Integer(Integer::new(
         Token::new(TokenType::Int, "5"),
         5,
@@ -953,17 +979,17 @@ mod tests {
 
   #[test]
   fn crab_parser_if_expression() {
-    let tests = vec![
+    let tests = [
       (
-        "if (x < y) { z }",
+        "let a = if (x < y) { z }",
         Expected::IfIdentifier("x".into(), "<".into(), "y".into(), "z".into(), None),
       ),
       (
-        "if x == y { z; }",
+        "let a = if x == y { z; }",
         Expected::IfIdentifier("x".into(), "==".into(), "y".into(), "z".into(), None),
       ),
       (
-        "if (x < y) { a } else { b }",
+        "let a = if (x < y) { a } else { b }",
         Expected::IfIdentifier(
           "x".into(),
           "<".into(),
@@ -973,7 +999,7 @@ mod tests {
         ),
       ),
       (
-        "if x == y { a; } else { b; true; };",
+        "let a = if x == y { a; } else { b; true; };",
         Expected::IfIdentifier(
           "x".into(),
           "==".into(),
@@ -983,7 +1009,7 @@ mod tests {
         ),
       ),
       (
-        "if x != y { z; } else if (a > b) { c }",
+        "let a = if x != y { z; } else if (a > b) { c }",
         Expected::IfIdentifier(
           "x".into(),
           "!=".into(),
@@ -993,7 +1019,7 @@ mod tests {
         ),
       ),
       (
-        "if x != y { z } else if (a > b) { c } else { return d };",
+        "let a = if x != y { z } else if (a > b) { c } else { return d };",
         Expected::IfIdentifier(
           "x".into(),
           "!=".into(),
@@ -1025,8 +1051,42 @@ mod tests {
   }
 
   #[test]
+  fn crab_parser_if_statements() {
+    let input = r#"
+      let a = if true { 10 }
+      true
+    "#;
+    let mut parser = CrabParser::from(input);
+    let _ = parser.parse_program();
+
+    assert_eq!(parser.errors.len(), 1, "error len");
+    assert_eq!(
+      parser.errors[0], "expected next token to be SEMICOLON, got BOOLEAN(true)",
+      "if expression requires semi",
+    );
+
+    let input = r#"
+      if true { 10 }
+      true
+    "#;
+    let mut parser = CrabParser::from(input);
+    let program = parser.parse_program();
+
+    test_parser_errors(&parser);
+    assert_eq!(program.statements().len(), 2, "statement length");
+    assert!(
+      matches!(program.statements()[0], Statement::If(_)),
+      "if statement"
+    );
+    assert!(
+      matches!(program.statements()[1], Statement::Expression(_)),
+      "expr statement"
+    );
+  }
+
+  #[test]
   fn crab_parser_function_expression() {
-    let tests = vec![
+    let tests = [
       (
         "fn(x, y) { x + y }",
         Expected::Function(vec!["x".into(), "y".into()], "{ (x + y); }".into()),
@@ -1090,7 +1150,7 @@ mod tests {
 
   #[test]
   fn crab_parser_block_expression() {
-    let tests = vec![
+    let tests = [
       ("{ x };", Expected::Block("x".into())),
       ("{ y; };", Expected::Block("y".into())),
     ];
@@ -1117,7 +1177,7 @@ mod tests {
 
   #[test]
   fn crab_parser_precedence() {
-    let tests = vec![
+    let tests = [
       ("-a * b;", "((-a) * b);"),
       ("!-a;", "(!(-a));"),
       ("a + b + c;", "((a + b) + c);"),
@@ -1158,6 +1218,7 @@ mod tests {
         "add(a + b + c * d / f + g)",
         "add((((a + b) + ((c * d) / f)) + g));",
       ),
+      ("nil + 1 * nil > true", "((nil + (1 * nil)) > true);"),
     ];
 
     for (i, (input, output)) in tests.iter().enumerate() {
@@ -1171,7 +1232,7 @@ mod tests {
 
   #[test]
   fn crab_parser_error_handling() {
-    let tests = vec![
+    let tests = [
       (
         "if (true { a }",
         vec!["expected next token to be RPAREN, got LBRACE({)"],
@@ -1209,14 +1270,14 @@ mod tests {
       parser.parse_program();
 
       assert_eq!(
-        parser.errors().len(),
+        parser.errors.len(),
         errors.len(),
         "test[{}-1] error count: {:?}",
         i,
-        parser.errors(),
+        parser.errors,
       );
       for (j, err) in errors.iter().enumerate() {
-        assert_eq!(parser.errors()[j], *err, "test[{}-{}-2] error value", i, j);
+        assert_eq!(parser.errors[j], *err, "test[{}-{}-2] error value", i, j);
       }
     }
   }

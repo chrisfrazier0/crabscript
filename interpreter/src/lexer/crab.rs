@@ -164,9 +164,10 @@ mod tests {
 
       10 == 10;
       10 != 9;
+      nil
     "#;
 
-    let tests = vec![
+    let tests = [
       (TokenType::Let, "let"),
       (TokenType::Ident, "five5"),
       (TokenType::Assign, "="),
@@ -240,6 +241,7 @@ mod tests {
       (TokenType::NotEq, "!="),
       (TokenType::Int, "9"),
       (TokenType::Semicolon, ";"),
+      (TokenType::Nil, "nil"),
       (TokenType::Eof, ""),
     ];
 

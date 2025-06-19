@@ -13,10 +13,12 @@ pub enum Statement {
   Let(LetStatement),
   Return(ReturnStatement),
   Expression(ExpressionStatement),
+  If(IfExpression),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
+  Nil(Nil),
   Integer(Integer),
   Boolean(Boolean),
   Identifier(Identifier),
@@ -50,6 +52,7 @@ impl fmt::Display for Statement {
       Self::Let(a) => a.fmt(f),
       Self::Return(a) => a.fmt(f),
       Self::Expression(a) => a.fmt(f),
+      Self::If(a) => a.fmt(f),
     }
   }
 }
@@ -57,6 +60,7 @@ impl fmt::Display for Statement {
 impl fmt::Display for Expression {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
+      Self::Nil(a) => a.fmt(f),
       Self::Integer(a) => a.fmt(f),
       Self::Boolean(a) => a.fmt(f),
       Self::Identifier(a) => a.fmt(f),
@@ -121,7 +125,7 @@ impl fmt::Display for LetStatement {
       .value
       .as_ref()
       .map(|v| v.to_string())
-      .unwrap_or("null".to_string());
+      .unwrap_or("nil".to_string());
     write!(f, "let {} = {};", self.name, value)
   }
 }
@@ -156,7 +160,7 @@ impl fmt::Display for ReturnStatement {
       .value
       .as_ref()
       .map(|v| v.to_string())
-      .unwrap_or("null".to_string());
+      .unwrap_or("nil".to_string());
     write!(f, "return {};", value)
   }
 }
@@ -198,6 +202,27 @@ impl ExpressionStatement {
 
   pub fn expr(&self) -> &Expression {
     &self.expr
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Nil {
+  token: Token,
+}
+
+impl fmt::Display for Nil {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "nil")
+  }
+}
+
+impl Nil {
+  pub fn new(token: Token) -> Self {
+    Self { token }
+  }
+
+  pub fn token(&self) -> &Token {
+    &self.token
   }
 }
 
@@ -537,6 +562,7 @@ mod tests {
     is_normal::<LetStatement>();
     is_normal::<ReturnStatement>();
     is_normal::<ExpressionStatement>();
+    is_normal::<Nil>();
     is_normal::<Integer>();
     is_normal::<Boolean>();
     is_normal::<Identifier>();
@@ -560,5 +586,12 @@ mod tests {
     ))]);
 
     assert_eq!(program.to_string(), "let myVar = anotherVar;");
+
+    let program = Program::new(vec![Statement::Return(ReturnStatement::new(
+      Token::new(TokenType::Return, "return"),
+      Some(Expression::Nil(Nil::new(Token::new(TokenType::Nil, "nil")))),
+    ))]);
+
+    assert_eq!(program.to_string(), "return nil;")
   }
 }
