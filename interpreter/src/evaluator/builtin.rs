@@ -5,6 +5,7 @@ use crate::{
 use std::{
   collections::HashMap,
   io::{self, BufRead},
+  rc::Rc,
   sync::LazyLock,
 };
 
@@ -54,7 +55,7 @@ fn itoa(args: &[&Object]) -> Object {
     ));
   }
   match args[0] {
-    Object::Integer(i) => Object::String(i.to_string()),
+    Object::Integer(i) => Object::String(Rc::new(i.to_string())),
     _ => Object::Error(format!(
       "argument to `itoa!` not supported, got `{}`",
       args[0]
@@ -89,7 +90,7 @@ fn ftoa(args: &[&Object]) -> Object {
     ));
   }
   match args[0] {
-    Object::Float(f) => Object::String(f.to_string()),
+    Object::Float(f) => Object::String(Rc::new(f.to_string())),
     _ => Object::Error(format!(
       "argument to `ftoa!` not supported, got `{}`",
       args[0]
@@ -155,10 +156,10 @@ fn len(args: &[&Object]) -> Object {
 }
 
 fn print(args: &[&Object]) -> Object {
-  let mut output = vec![];
+  let mut output: Vec<String> = vec![];
   for arg in args {
     match arg {
-      Object::String(s) => output.push(s.clone()),
+      Object::String(s) => output.push((**s).clone()),
       other => output.push(other.to_string()),
     }
   }
@@ -170,7 +171,7 @@ fn println(args: &[&Object]) -> Object {
   let mut output = vec![];
   for arg in args {
     match arg {
-      Object::String(s) => output.push(s.clone()),
+      Object::String(s) => output.push((**s).clone()),
       other => output.push(other.to_string()),
     }
   }
@@ -208,7 +209,7 @@ fn read(args: &[&Object]) -> Object {
   }
   let mut line = String::new();
   if io::stdin().lock().read_line(&mut line).is_ok() {
-    Object::String(line.trim_end_matches(['\r', '\n']).to_string())
+    Object::String(Rc::new(line.trim_end_matches(['\r', '\n']).into()))
   } else {
     Object::Error("failed to read from stdin".to_string())
   }
@@ -222,7 +223,7 @@ fn trim(args: &[&Object]) -> Object {
     ));
   }
   match args[0] {
-    Object::String(s) => Object::String(s.trim().to_string()),
+    Object::String(s) => Object::String(Rc::new(s.trim().into())),
     _ => Object::Error(format!(
       "argument to `trim!` not supported, got `{}`",
       args[0]
@@ -238,14 +239,14 @@ fn type_of(args: &[&Object]) -> Object {
     ));
   }
   match args[0] {
-    Object::Nil => Object::String("nil".into()),
-    Object::Integer(_) => Object::String("integer".into()),
-    Object::Float(_) => Object::String("float".into()),
-    Object::Boolean(_) => Object::String("boolean".into()),
-    Object::String(_) => Object::String("string".into()),
-    Object::Function(_, _) => Object::String("function".into()),
-    Object::Builtin(_, _) => Object::String("builtin".into()),
-    Object::Error(_) => Object::String("error".into()),
+    Object::Nil => Object::String(Rc::new("nil".into())),
+    Object::Integer(_) => Object::String(Rc::new("integer".into())),
+    Object::Float(_) => Object::String(Rc::new("float".into())),
+    Object::Boolean(_) => Object::String(Rc::new("boolean".into())),
+    Object::String(_) => Object::String(Rc::new("string".into())),
+    Object::Function(_, _) => Object::String(Rc::new("function".into())),
+    Object::Builtin(_, _) => Object::String(Rc::new("builtin".into())),
+    Object::Error(_) => Object::String(Rc::new("error".into())),
     Object::Return(x) => type_of(&[x]),
   }
 }

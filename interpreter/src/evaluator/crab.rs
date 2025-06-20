@@ -2,7 +2,7 @@ use crate::{
   evaluator::{Evaluator, Shared, builtin::BUILTINS, env::Environment, object::Object},
   parser::ast::{Alternative, BlockExpression, Expression, IfExpression, Node, Statement},
 };
-use std::mem;
+use std::{mem, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CrabEvaluator;
@@ -75,7 +75,7 @@ impl CrabEvaluator {
       Expression::Integer(i) => Object::Integer(i.value()),
       Expression::Float(f) => Object::Float(f.value()),
       Expression::Boolean(b) => Object::Boolean(b.value()),
-      Expression::String(s) => Object::String(s.value().to_string()),
+      Expression::String(s) => Object::String(Rc::new(s.value().into())),
       Expression::Identifier(id) => env
         .borrow()
         .get(id.value())
@@ -107,7 +107,7 @@ impl CrabEvaluator {
         self.eval_infix(f.op(), &left, &right)
       }
       Expression::If(ie) => self.eval_if(ie, env),
-      Expression::Function(fe) => Object::Function(fe.clone(), env),
+      Expression::Function(fe) => Object::Function(Rc::new(fe.clone()), env),
       Expression::Call(ce) => {
         let function = self.eval_expression(ce.function(), env.clone());
         if matches!(function, Object::Error(_)) {
@@ -208,7 +208,7 @@ impl CrabEvaluator {
 
   fn eval_infix_strings(&self, op: &str, left: &str, right: &str) -> Object {
     match op {
-      "+" => Object::String(left.to_string() + right),
+      "+" => Object::String(Rc::new(left.to_string() + right)),
       "==" => Object::Boolean(left == right),
       "!=" => Object::Boolean(left != right),
       _ => Object::Error(format!("unknown operator: STRING {} STRING", op)),
@@ -271,7 +271,12 @@ mod tests {
   use super::*;
   use crate::{
     evaluator::object::Object,
-    parser::{Parser, crab::CrabParser},
+    lexer::token::{Token, TokenType},
+    parser::{
+      Parser,
+      ast::{FunctionExpression, Identifier, LetStatement, StringValue},
+      crab::CrabParser,
+    },
   };
 
   // --- Test Helpers ---
@@ -401,8 +406,14 @@ mod tests {
   #[test]
   fn crab_eval_string() {
     let tests = [
-      ("'hello_world'", Object::String("hello_world".into())),
-      ("'Hello World!';", Object::String("Hello World!".into())),
+      (
+        "'hello_world'",
+        Object::String(Rc::new("hello_world".into())),
+      ),
+      (
+        "'Hello World!';",
+        Object::String(Rc::new("Hello World!".into())),
+      ),
     ];
 
     for (i, (input, expected)) in tests.iter().enumerate() {
@@ -416,7 +427,7 @@ mod tests {
     let tests = [
       (
         "'Hello ' + 'World!';",
-        Object::String("Hello World!".into()),
+        Object::String(Rc::new("Hello World!".into())),
       ),
       ("'Hello' == 'Hello'", Object::Boolean(true)),
       ("'Hello' != 'Hello'", Object::Boolean(false)),
@@ -627,6 +638,118 @@ mod tests {
         "test[{}] value",
         i + 1
       );
+    }
+  }
+
+  #[test]
+  fn crab_eval_memory_eff_strings() {
+    let crab = CrabEvaluator::default();
+    let env = Environment::shared();
+
+    let a = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "a"), "a".to_string()),
+      Some(Expression::String(StringValue::new(
+        Token::new(TokenType::String, "hello"),
+        "hello".to_string(),
+      ))),
+    ));
+    let b = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "b"), "b".to_string()),
+      Some(Expression::String(StringValue::new(
+        Token::new(TokenType::String, "hello"),
+        "hello".to_string(),
+      ))),
+    ));
+    let c = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "c"), "c".to_string()),
+      Some(Expression::Identifier(Identifier::new(
+        Token::new(TokenType::String, "a"),
+        "a".to_string(),
+      ))),
+    ));
+
+    let a_out = crab.eval(&Node::Statement(a), env.clone());
+    let b_out = crab.eval(&Node::Statement(b), env.clone());
+    let c_out = crab.eval(&Node::Statement(c), env);
+
+    match (&a_out, &b_out) {
+      (Object::String(a), Object::String(b)) => {
+        assert!(!Rc::ptr_eq(a, b), "test[1] pointers should differ")
+      }
+      _ => panic!(
+        "test[1] Expected both to be strings, got: {:?} and {:?}",
+        a_out, b_out
+      ),
+    }
+
+    match (&a_out, &c_out) {
+      (Object::String(a), Object::String(c)) => {
+        assert!(Rc::ptr_eq(a, c), "test[2] pointers should be equal")
+      }
+      _ => panic!(
+        "test[2] Expected both to be strings, got: {:?} and {:?}",
+        a_out, c_out
+      ),
+    }
+  }
+
+  #[test]
+  fn crab_eval_memory_eff_fns() {
+    let crab = CrabEvaluator::default();
+    let env = Environment::shared();
+
+    let a = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "a"), "a".to_string()),
+      Some(Expression::Function(FunctionExpression::new(
+        Token::new(TokenType::Function, "fn"),
+        vec![],
+        BlockExpression::new(Token::new(TokenType::LBrace, "{"), vec![]),
+      ))),
+    ));
+    let b = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "b"), "b".to_string()),
+      Some(Expression::Function(FunctionExpression::new(
+        Token::new(TokenType::Function, "fn"),
+        vec![],
+        BlockExpression::new(Token::new(TokenType::LBrace, "{"), vec![]),
+      ))),
+    ));
+    let c = Statement::Let(LetStatement::new(
+      Token::new(TokenType::Let, "let"),
+      Identifier::new(Token::new(TokenType::String, "c"), "c".to_string()),
+      Some(Expression::Identifier(Identifier::new(
+        Token::new(TokenType::String, "a"),
+        "a".to_string(),
+      ))),
+    ));
+
+    let a_out = crab.eval(&Node::Statement(a), env.clone());
+    let b_out = crab.eval(&Node::Statement(b), env.clone());
+    let c_out = crab.eval(&Node::Statement(c), env);
+
+    match (&a_out, &b_out) {
+      (Object::Function(a, _), Object::Function(b, _)) => {
+        assert!(!Rc::ptr_eq(a, b), "test[1] pointers should differ")
+      }
+      _ => panic!(
+        "test[1] Expected both to be functions, got: {:?} and {:?}",
+        a_out, b_out
+      ),
+    }
+
+    match (&a_out, &c_out) {
+      (Object::Function(a, _), Object::Function(c, _)) => {
+        assert!(Rc::ptr_eq(a, c), "test[2] pointers should be equal")
+      }
+      _ => panic!(
+        "test[2] Expected both to be functions, got: {:?} and {:?}",
+        a_out, c_out
+      ),
     }
   }
 }

@@ -3,7 +3,7 @@ use crate::{
   format::f64_to_string,
   parser::ast::FunctionExpression,
 };
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub enum Object {
@@ -11,8 +11,8 @@ pub enum Object {
   Integer(i64),
   Float(f64),
   Boolean(bool),
-  String(String),
-  Function(FunctionExpression, Shared<Environment>),
+  String(Rc<String>),
+  Function(Rc<FunctionExpression>, Shared<Environment>),
   Builtin(String, BuiltinFunction),
   Return(Box<Object>),
   Error(String),
