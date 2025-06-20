@@ -135,11 +135,19 @@ impl CrabLexer {
 
   fn read_string(&mut self) -> String {
     self.read_char();
-    let position = self.position;
-    while self.ch.is_some_and(|ch| ch != '\'') {
+    let mut result = String::new();
+    while let Some(ch) = self.ch {
+      if ch == '\'' {
+        break;
+      } else if ch == '\\' && self.peek_char() == Some('\'') {
+        self.read_char();
+        result.push_str("\\'");
+      } else {
+        result.push(ch);
+      }
       self.read_char();
     }
-    self.input[position..self.position].iter().collect()
+    result
   }
 
   fn is_letter(ch: char) -> bool {
@@ -197,6 +205,7 @@ mod tests {
       'foobar'
       nil
       'foo bar'
+      '\'one\' \'two\''
     "#;
 
     let tests = [
@@ -281,6 +290,7 @@ mod tests {
       (TokenType::String, "foobar"),
       (TokenType::Nil, "nil"),
       (TokenType::String, "foo bar"),
+      (TokenType::String, "\\'one\\' \\'two\\'"),
     ];
 
     let mut lexer = CrabLexer::new(input);
