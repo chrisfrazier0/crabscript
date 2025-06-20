@@ -28,12 +28,12 @@ impl Environment {
   }
 
   pub fn get(&self, key: &str) -> Option<Object> {
-    self.store.get(key).cloned().or_else(|| {
+    self.store.get(key).cloned().or(
       self
         .outer
         .as_ref()
-        .and_then(|outer| outer.borrow().get(key))
-    })
+        .and_then(|outer| outer.borrow().get(key)),
+    )
   }
 }
 
