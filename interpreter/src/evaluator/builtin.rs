@@ -4,7 +4,7 @@ use crate::{
 };
 use std::{
   collections::HashMap,
-  io::{self, BufRead},
+  io::{self, BufRead, Write},
   rc::Rc,
   sync::LazyLock,
 };
@@ -164,6 +164,7 @@ fn print(args: &[&Object]) -> Object {
     }
   }
   print!("{}", process_escapes(&output.join(" ")));
+  let _ = io::stdout().flush();
   Object::Nil
 }
 
@@ -176,6 +177,7 @@ fn println(args: &[&Object]) -> Object {
     }
   }
   println!("{}", process_escapes(&output.join(" ")));
+  let _ = io::stdout().flush();
   Object::Nil
 }
 
